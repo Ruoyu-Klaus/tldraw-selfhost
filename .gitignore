@@ -2,6 +2,7 @@ node_modules/
 dist/
 .rooms/
 .assets/
+logs/
 *.db
 .env
 .env.local
