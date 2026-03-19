@@ -91,7 +91,11 @@ function RoomPage({
         </span>
       </div>
       <div className="room-canvas">
-        <Tldraw store={store} onMount={onMount} />
+        <Tldraw
+          store={store}
+          onMount={onMount}
+          licenseKey={import.meta.env.VITE_TLDRAW_LICENSE_KEY}
+        />
       </div>
     </>
   )

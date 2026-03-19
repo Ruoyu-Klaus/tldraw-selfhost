@@ -10,12 +10,23 @@ cd tldraw-selfhost
 npm install
 ```
 
-### 2. 构建前端
+### 2. 申请 tldraw License Key（生产必须）
+
+| 用途 | 链接 | 费用 |
+|------|------|------|
+| 个人非商业（Hobby） | https://tldraw.dev/get-a-license/hobby | 免费，有水印 |
+| 100天试用（Trial） | https://tldraw.dev/get-a-license/trial | 免费，无水印 |
+
+申请后收到 `tldraw-xxx...` 格式的 key。
+
+### 3. 构建前端（注入 License Key）
 
 ```bash
-npm run build
-# 输出到 dist/client/，后端生产模式下会自动托管这些静态文件
+# 把 key 作为环境变量传入 Vite build（Vite 会在编译时注入到前端代码）
+VITE_TLDRAW_LICENSE_KEY=tldraw-你的key npm run build
 ```
+
+⚠️ key 在构建时注入，每次修改 key 后需重新 build 并重启服务。
 
 ### 3. 安装 PM2
 
