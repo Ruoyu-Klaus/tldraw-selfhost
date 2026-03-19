@@ -11,14 +11,13 @@ import {
 } from 'tldraw'
 import './index.css'
 
-// ── 工具函数 ─────────────────────────────────────────────────────────────────
 
 function getWsUri(roomId: string): string {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${location.host}/connect/${roomId}`
 }
 
-// ── 资源（图片/视频）上传到本地磁盘 ──────────────────────────────────────────
+// ──  Resources (images/videos) upload to local disk ──────────────────────────────────────────
 
 const assetStore: TLAssetStore = {
   async upload(_asset, file) {
@@ -36,7 +35,7 @@ const assetStore: TLAssetStore = {
   },
 }
 
-// ── 书签 unfurl（链接预览元数据） ────────────────────────────────────────────
+// ──  Bookmark unfurl (link preview metadata) ────────────────────────────────────────────
 
 async function unfurlBookmarkUrl({ url }: { url: string }): Promise<TLBookmarkAsset> {
   const asset: TLBookmarkAsset = {
@@ -55,7 +54,7 @@ async function unfurlBookmarkUrl({ url }: { url: string }): Promise<TLBookmarkAs
     asset.props.favicon = data?.favicon ?? ''
     asset.props.title = data?.title ?? ''
   } catch (e) {
-    console.warn('[unfurl] 失败:', e)
+    console.warn('[unfurl] failed:', e)
   }
 
   return asset
@@ -105,7 +104,7 @@ function RoomPage({
         const snapshot = JSON.parse(text)
         editorRef.current?.loadSnapshot(snapshot)
       } catch (e) {
-        alert('导入失败：JSON 格式无效')
+        alert('Import failed: Invalid JSON format')
         console.error(e)
       }
     }
@@ -116,17 +115,17 @@ function RoomPage({
     <>
       <div className="room-header">
         <button className="back-btn" onClick={onBack}>
-          &larr; 返回
+          &larr; Back
         </button>
         <span>
-          房间：<strong>{roomId}</strong>
+          Room：<strong>{roomId}</strong>
         </span>
         <div className="room-header-actions">
-          <button className="snapshot-btn" onClick={handleImport} title="导入快照（覆盖当前画布）">
-            &uarr; 导入
+          <button className="snapshot-btn" onClick={handleImport} title="Import snapshot (override current canvas)">
+            &uarr; Import
           </button>
-          <button className="snapshot-btn" onClick={handleExport} title="导出当前画布为 JSON">
-            &darr; 导出
+          <button className="snapshot-btn" onClick={handleExport} title="Export current canvas as JSON">
+            &darr; Export
           </button>
         </div>
       </div>
@@ -175,34 +174,34 @@ function LobbyPage({ onEnter }: { onEnter: (roomId: string) => void }) {
 
   return (
     <div className="lobby">
-      <h1>🎨 tldraw 多人画板</h1>
-      <p>输入房间 ID 进入（留空自动生成），同一房间 ID 即可多人协作</p>
+      <h1>🎨 tldraw whiteBorad</h1>
+      <p>Enter room ID or go existing room to create the world.</p>
 
       <div className="lobby-form">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleEnter()}
-          placeholder="房间 ID（留空自动生成）"
+          placeholder="Room ID"
           autoFocus
         />
-        <button onClick={handleEnter}>进入 / 新建</button>
+        <button onClick={handleEnter}>Go / New</button>
       </div>
 
       {rooms.length > 0 && (
         <>
-          <p className="lobby-list-title">历史房间（按最近修改排序）</p>
+          <p className="lobby-list-title">Rooms(Sorted by last modified)</p>
           <div className="lobby-list">
             {rooms.map(({ id, active, updatedAt }) => (
               <div key={id} className="lobby-list-item">
                 <div className="lobby-list-item-info">
                   <span className="lobby-room-id">{id}</span>
                   <span className="lobby-room-meta">
-                    {active && <span className="lobby-badge-active">● 活跃</span>}
+                    {active && <span className="lobby-badge-active">● Active</span>}
                     <span className="lobby-room-time">{formatTime(updatedAt)}</span>
                   </span>
                 </div>
-                <button onClick={() => onEnter(id)}>进入</button>
+                <button onClick={() => onEnter(id)}>Go</button>
               </div>
             ))}
           </div>
@@ -214,16 +213,14 @@ function LobbyPage({ onEnter }: { onEnter: (roomId: string) => void }) {
 
 function formatTime(ms: number): string {
   const diff = Date.now() - ms
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} 小时前`
+  if (diff < 60_000) return 'Just now'
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)} minutes ago`
+  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} hours ago`
   return new Date(ms).toLocaleDateString('zh-CN')
 }
 
-// ── 根组件 ───────────────────────────────────────────────────────────────────
 
 export default function App() {
-  // 从 URL hash 中读取房间 ID，支持直接分享链接
   const [roomId, setRoomId] = useState<string | null>(() => {
     const hash = location.hash.replace(/^#/, '').trim()
     return hash || null
