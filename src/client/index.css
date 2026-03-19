@@ -180,6 +180,30 @@ body,
   background: #f3f4f6;
 }
 
+.room-header-actions {
+  display: flex;
+  gap: 6px;
+  pointer-events: all;
+}
+
+.room-header .snapshot-btn {
+  pointer-events: all;
+  cursor: pointer;
+  background: none;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  color: #555;
+  transition: all 0.2s;
+}
+
+.room-header .snapshot-btn:hover {
+  background: #f3f4f6;
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+
 .room-canvas {
   position: fixed;
   inset: 44px 0 0 0;

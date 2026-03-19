@@ -1,5 +1,5 @@
 import { useSync } from '@tldraw/sync'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AssetRecordType,
   Editor,
@@ -73,22 +73,62 @@ function RoomPage({
     assets: assetStore,
   })
 
+  const editorRef = useRef<Editor | null>(null)
+
   const onMount = useCallback((editor: Editor) => {
+    editorRef.current = editor
     editor.registerExternalAssetHandler('url', unfurlBookmarkUrl)
+  }, [])
+
+  const handleExport = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    const snapshot = editor.getSnapshot()
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${roomId}-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [roomId])
+
+  const handleImport = useCallback(() => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json'
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const snapshot = JSON.parse(text)
+        editorRef.current?.loadSnapshot(snapshot)
+      } catch (e) {
+        alert('导入失败：JSON 格式无效')
+        console.error(e)
+      }
+    }
+    input.click()
   }, [])
 
   return (
     <>
       <div className="room-header">
         <button className="back-btn" onClick={onBack}>
-          ← 返回
+          &larr; 返回
         </button>
         <span>
           房间：<strong>{roomId}</strong>
         </span>
-        <span style={{ fontSize: '0.8rem', color: '#aaa' }}>
-          多人实时 · 数据本地持久化
-        </span>
+        <div className="room-header-actions">
+          <button className="snapshot-btn" onClick={handleImport} title="导入快照（覆盖当前画布）">
+            &uarr; 导入
+          </button>
+          <button className="snapshot-btn" onClick={handleExport} title="导出当前画布为 JSON">
+            &darr; 导出
+          </button>
+        </div>
       </div>
       <div className="room-canvas">
         <Tldraw
