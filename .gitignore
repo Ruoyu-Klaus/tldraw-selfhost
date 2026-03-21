@@ -6,3 +6,4 @@ logs/
 *.db
 .env
 .env.local
+.env.production
