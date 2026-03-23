@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   root: path.join(__dirname, 'src/client'),
   publicDir: path.join(__dirname, 'public'),
+  envDir: __dirname,
   server: {
     port: 5757,
     proxy: {
