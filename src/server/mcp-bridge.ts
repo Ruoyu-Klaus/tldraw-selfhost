@@ -149,6 +149,59 @@ class McpBridgeManager {
 
     console.log(`[mcp-bridge] MCP Server 连接 room=${roomId}`)
 
+    // MCP Server → 浏览器：收到请求后转发，浏览器的响应再原路返回
+    socket.on('message', (raw) => {
+      let req: McpRequest
+      try {
+        req = JSON.parse(raw.toString())
+      } catch {
+        return
+      }
+      if (req.type !== 'request') return
+
+      const browser = room.browserSocket
+      if (!browser || browser.readyState !== 1) {
+        const errResp: McpResponse = {
+          type: 'response',
+          id: req.id,
+          ok: false,
+          error: `room "${roomId}" 没有浏览器客户端连接，请先在浏览器中打开该房间`,
+        }
+        socket.send(JSON.stringify(errResp))
+        return
+      }
+
+      // 注册一个一次性监听：等待浏览器返回对应 id 的响应，再转发给 MCP Server
+      const onBrowserMessage = (browserRaw: Buffer) => {
+        let resp: McpResponse
+        try {
+          resp = JSON.parse(browserRaw.toString())
+        } catch {
+          return
+        }
+        if (resp.type !== 'response' || resp.id !== req.id) return
+
+        // 找到了匹配的响应，移除监听并转发
+        browser.off('message', onBrowserMessage)
+        clearTimeout(timer)
+        if (socket.readyState === 1) socket.send(JSON.stringify(resp))
+      }
+
+      const timer = setTimeout(() => {
+        browser.off('message', onBrowserMessage)
+        const errResp: McpResponse = {
+          type: 'response',
+          id: req.id,
+          ok: false,
+          error: `请求超时 (10s): ${req.action}`,
+        }
+        if (socket.readyState === 1) socket.send(JSON.stringify(errResp))
+      }, 10_000)
+
+      browser.on('message', onBrowserMessage)
+      browser.send(JSON.stringify(req))
+    })
+
     socket.on('close', () => {
       console.log(`[mcp-bridge] MCP Server 断开 room=${roomId}`)
       if (room.mcpSocket === socket) {
