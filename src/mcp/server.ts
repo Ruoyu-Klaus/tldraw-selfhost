@@ -265,5 +265,7 @@ server.tool(
 
 // ── 启动 ──────────────────────────────────────────────────────────────────────
 
-const transport = new StdioServerTransport()
-await server.connect(transport)
+;(async () => {
+  const transport = new StdioServerTransport()
+  await server.connect(transport)
+})()
