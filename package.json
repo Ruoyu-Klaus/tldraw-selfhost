@@ -9,12 +9,14 @@
     "dev:client": "vite dev",
     "build": "vite build",
     "start": "NODE_ENV=production tsx src/server/server.ts",
-    "deploy": "npm run build && pm2 start ecosystem.config.cjs"
+    "deploy": "npm run build && pm2 start ecosystem.config.cjs",
+    "mcp": "tsx src/mcp/server.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",
     "@fastify/static": "^8.0.0",
     "@fastify/websocket": "^11.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@tldraw/sync": "4.5.3",
     "@tldraw/sync-core": "4.5.3",
     "better-sqlite3": "^11.8.1",

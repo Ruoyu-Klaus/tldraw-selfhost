@@ -63,31 +63,54 @@
 
 ### Bearer Token（简单静态 Token）
 
-所有 MCP 相关端点统一通过 **Bearer Token** 鉴权，Token 存在服务端 `.env.local`。
+`MCP_TOKEN` 只存在于**服务端进程**（Fastify + MCP Server），永远不暴露到浏览器前端。
 
-**WebSocket 连接时**通过 query param 传递（WebSocket 标准不支持自定义 Header）：
+连接 `/mcp-bridge` 时，根据 `role` 参数区分两类客户端，采用不同的鉴权方式：
+
+| 客户端 | 鉴权方式 | 说明 |
+|--------|----------|------|
+| **MCP Server**（外部进程） | `?token=<MCP_TOKEN>` | 必须携带正确 Token |
+| **浏览器**（自己的前端） | 验证 `Origin` 头 | 只接受与 Fastify 同源的请求 |
 
 ```
-ws://localhost:5858/mcp-bridge?token=<MCP_TOKEN>&roomId=<roomId>
+# MCP Server 连接
+ws://localhost:5858/mcp-bridge?role=mcp&token=<MCP_TOKEN>&roomId=yyy
+
+# 浏览器连接（无需 token，由 Origin 校验）
+ws://localhost:5858/mcp-bridge?role=browser&roomId=yyy
 ```
+
+**为什么浏览器不用 Token**：`VITE_` 前缀的环境变量会被编译进 JS bundle，任何人都能从 DevTools 读到，毫无保护意义。浏览器客户端是可信的（已经在访问你的服务），用 Origin 校验即可防止外部浏览器冒充。
 
 **验证逻辑**（Fastify 端）：
 
 ```typescript
 // src/server/server.ts 新增
 app.get('/mcp-bridge', { websocket: true }, async (socket, req) => {
-  const { token, roomId } = req.query as Record<string, string>
+  const { token, roomId, role } = req.query as Record<string, string>
 
-  if (!token || token !== process.env.MCP_TOKEN) {
-    socket.close(4001, 'Unauthorized')
-    return
-  }
   if (!roomId) {
     socket.close(4002, 'roomId required')
     return
   }
 
-  mcpBridgeManager.registerClient(roomId, socket)
+  if (role === 'mcp') {
+    // MCP Server：验证 Bearer Token
+    if (!token || token !== process.env.MCP_TOKEN) {
+      socket.close(4001, 'Unauthorized')
+      return
+    }
+  } else {
+    // 浏览器：验证 Origin（必须与 Fastify 同源）
+    const origin = req.headers.origin ?? ''
+    const host = req.headers.host ?? ''
+    if (!isAllowedOrigin(origin, host)) {
+      socket.close(4003, 'Forbidden origin')
+      return
+    }
+  }
+
+  mcpBridgeManager.register(role, roomId, socket)
 })
 ```
 
@@ -556,11 +579,9 @@ app.get('/mcp-bridge', { websocket: true }, async (socket, req) => {
 ```typescript
 export function useMcpBridge(editor: Editor, roomId: string) {
   useEffect(() => {
-    const token = import.meta.env.VITE_MCP_TOKEN
-    if (!token) return  // 未配置则不启用
-
+    // 浏览器连接不需要 token，由服务端 Origin 校验
     const ws = new WebSocket(
-      `${getWsBridgeUri()}?token=${token}&roomId=${roomId}&role=browser`
+      `${getWsBridgeUri()}?role=browser&roomId=${roomId}`
     )
 
     ws.onmessage = async (event) => {
@@ -675,5 +696,5 @@ Claude 会：
 
 1. **浏览器必须已打开对应 Room**：MCP 通过浏览器客户端操作 editor，若该 Room 没有浏览器打开，变更类操作会返回错误（查询类可降级为 REST 读 SQLite）。
 2. **多浏览器客户端**：同一 Room 有多个浏览器 tab 时，MCP 命令只发给最后连接的那个（可扩展为广播）。
-3. **Token 安全**：`VITE_MCP_TOKEN` 会被编译进前端 bundle，生产环境建议改为服务端生成的临时 token，或使用 cookie session。
+3. **Token 安全**：`MCP_TOKEN` 只在服务端进程中使用，不会出现在任何前端代码或 bundle 中。浏览器连接通过 Origin 校验，无需 token。
 4. **tldraw 坐标系**：画布坐标以像素为单位，(0,0) 在画布原点（非视口中心），AI 需要参考 `get_shapes` 返回的已有 shape 位置来推断合适的放置坐标。
