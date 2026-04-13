@@ -6,6 +6,7 @@ import { existsSync } from 'fs'
 import { resolve } from 'path'
 import type { RawData } from 'ws'
 import { loadAsset, storeAsset } from './assets'
+import { mcpBridge } from './mcp-bridge'
 import { listRooms, makeOrLoadRoom } from './rooms'
 import { unfurl } from './unfurl'
 
@@ -87,6 +88,40 @@ app.register(async (app) => {
   app.get('/api/health', async (_req, res) => {
     res.send({ ok: true, mode: IS_PROD ? 'production' : 'development' })
   })
+
+  // ── MCP Bridge：MCP Server ↔ 浏览器 editor 的 WebSocket 中转 ────────
+  app.get('/mcp-bridge', { websocket: true }, async (socket, req) => {
+    const query = req.query as Record<string, string>
+    const { role, roomId, token } = query
+
+    if (!roomId) {
+      socket.close(4002, 'roomId is required')
+      return
+    }
+
+    if (role === 'mcp') {
+      // MCP Server 连接：校验 Bearer Token
+      const expected = process.env.MCP_TOKEN
+      if (!expected) {
+        socket.close(4001, 'MCP_TOKEN not configured on server')
+        return
+      }
+      if (token !== expected) {
+        socket.close(4001, 'Unauthorized: invalid token')
+        return
+      }
+      mcpBridge.registerMcp(roomId, socket)
+    } else {
+      // 浏览器连接：校验 Origin，必须与当前服务同源
+      const origin = req.headers.origin ?? ''
+      const host = req.headers.host ?? ''
+      if (!isAllowedOrigin(origin, host)) {
+        socket.close(4003, `Forbidden origin: ${origin}`)
+        return
+      }
+      mcpBridge.registerBrowser(roomId, socket)
+    }
+  })
 })
 
 // SPA fallback：生产模式下所有未匹配的路由都返回 index.html
@@ -94,6 +129,30 @@ if (IS_PROD && existsSync(CLIENT_DIST)) {
   app.setNotFoundHandler(async (_req, res) => {
     res.sendFile('index.html', CLIENT_DIST)
   })
+}
+
+// ── 工具函数 ──────────────────────────────────────────────────────────────────
+
+/**
+ * 校验浏览器 WebSocket 连接的 Origin，防止外部页面冒充浏览器客户端。
+ *
+ * 允许规则：
+ *  - origin 与 host 同主机名（生产）
+ *  - origin 为空（某些 WebSocket 客户端不发 Origin，如 wscat 本地调试）
+ *  - host 为 localhost / 127.0.0.1（本地开发）
+ */
+function isAllowedOrigin(origin: string, host: string): boolean {
+  if (!origin) return true          // 无 Origin 头，放行（wscat/本地工具）
+
+  const hostname = host.split(':')[0]
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return true
+
+  try {
+    const originHostname = new URL(origin).hostname
+    return originHostname === hostname
+  } catch {
+    return false
+  }
 }
 
 app.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
