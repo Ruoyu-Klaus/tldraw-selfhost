@@ -12,6 +12,7 @@ export default defineConfig({
     proxy: {
       // 开发时将 API 请求代理到后端，避免 CORS 问题
       '/connect': { target: 'ws://localhost:5858', ws: true },
+      '/mcp-bridge': { target: 'ws://localhost:5858', ws: true },
       '/uploads': { target: 'http://localhost:5858' },
       '/unfurl': { target: 'http://localhost:5858' },
       '/api': { target: 'http://localhost:5858' },
