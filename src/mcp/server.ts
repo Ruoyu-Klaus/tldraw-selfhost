@@ -21,8 +21,15 @@ const BASE_URL = (process.env.TLDRAW_BASE_URL ?? 'http://localhost:5858').replac
 const TOKEN = process.env.MCP_TOKEN ?? ''
 const WS_BASE = BASE_URL.replace(/^http/, 'ws')
 
+// Cloudflare Zero Trust Service Token（外网访问时需要）
+const CF_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID ?? ''
+const CF_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET ?? ''
+
 if (!TOKEN) {
   process.stderr.write('[tldraw-mcp] 警告: MCP_TOKEN 未设置，连接会被服务端拒绝\n')
+}
+if (BASE_URL !== 'http://localhost:5858' && (!CF_CLIENT_ID || !CF_CLIENT_SECRET)) {
+  process.stderr.write('[tldraw-mcp] 警告: 外网模式建议设置 CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET\n')
 }
 
 // ── WebSocket 请求转发 ────────────────────────────────────────────────────────
@@ -37,7 +44,13 @@ function getWs(roomId: string): Promise<WebSocket> {
 
   return new Promise((resolve, reject) => {
     const url = `${WS_BASE}/mcp-bridge?role=mcp&token=${encodeURIComponent(TOKEN)}&roomId=${encodeURIComponent(roomId)}`
-    const ws = new WebSocket(url)
+
+    // CF Zero Trust Service Token 头（本地开发时为空，外网时必须）
+    const cfHeaders: Record<string, string> = {}
+    if (CF_CLIENT_ID) cfHeaders['CF-Access-Client-Id'] = CF_CLIENT_ID
+    if (CF_CLIENT_SECRET) cfHeaders['CF-Access-Client-Secret'] = CF_CLIENT_SECRET
+
+    const ws = new WebSocket(url, { headers: cfHeaders })
 
     const timeout = setTimeout(() => {
       ws.terminate()
