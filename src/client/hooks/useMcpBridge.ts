@@ -180,8 +180,11 @@ async function handleRequest(editor: Editor, req: McpRequest): Promise<unknown> 
 
 // ── useMcpBridge hook ─────────────────────────────────────────────────────────
 
-export function useMcpBridge(editor: Editor, roomId: string) {
+export function useMcpBridge(editor: Editor | null, roomId: string) {
   useEffect(() => {
+    if (!editor) return
+    // editor is non-null from here; rebind for TypeScript narrowing in closures
+    const ed = editor
     let ws: WebSocket | null = null
     let destroyed = false
 
@@ -205,7 +208,7 @@ export function useMcpBridge(editor: Editor, roomId: string) {
 
         let response: McpResponse
         try {
-          const data = await handleRequest(editor, req)
+          const data = await handleRequest(ed, req)
           response = { type: 'response', id: req.id, ok: true, data }
         } catch (err: any) {
           response = { type: 'response', id: req.id, ok: false, error: err.message }
@@ -227,13 +230,13 @@ export function useMcpBridge(editor: Editor, roomId: string) {
 
     function pushContext() {
       if (ws?.readyState !== WebSocket.OPEN) return
-      const page = editor.getCurrentPage()
+      const page = ed.getCurrentPage()
       const ctx: McpContextPush = {
         type: 'context',
         roomId,
         pageId: page.id,
         pageName: page.name,
-        pageCount: editor.getPages().length,
+        pageCount: ed.getPages().length,
       }
       ws.send(JSON.stringify(ctx))
     }
@@ -241,7 +244,7 @@ export function useMcpBridge(editor: Editor, roomId: string) {
     connect()
 
     // 当用户切换 page 时，主动上报新的 context
-    const unsubscribe = editor.store.listen(
+    const unsubscribe = ed.store.listen(
       () => pushContext(),
       { scope: 'session' }
     )

@@ -9,6 +9,7 @@ import {
   Tldraw,
   uniqueId,
 } from 'tldraw'
+import { useMcpBridge } from './hooks/useMcpBridge'
 import './index.css'
 
 
@@ -73,11 +74,16 @@ function RoomPage({
   })
 
   const editorRef = useRef<Editor | null>(null)
+  const [mountedEditor, setMountedEditor] = useState<Editor | null>(null)
 
   const onMount = useCallback((editor: Editor) => {
     editorRef.current = editor
+    setMountedEditor(editor)
     editor.registerExternalAssetHandler('url', unfurlBookmarkUrl)
   }, [])
+
+  // MCP Bridge：连接服务端中转，让 Copilot/Claude 等 AI agent 操作画布
+  useMcpBridge(mountedEditor, roomId)
 
   const handleExport = useCallback(() => {
     const editor = editorRef.current
