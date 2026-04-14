@@ -39,7 +39,7 @@ jobs:
 
       - name: Bump package version to match tag
         working-directory: packages/tldraw-selfhost-mcp
-        run: npm version ${{ steps.version.outputs.version }} --no-git-tag-version
+        run: npm version ${{ steps.version.outputs.version }} --no-git-tag-version --allow-same-version
 
       - name: Pack
         working-directory: packages/tldraw-selfhost-mcp
