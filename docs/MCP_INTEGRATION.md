@@ -515,7 +515,84 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ---
 
-## 9. 实现步骤
+## 9. 外网使用：可分发独立包（推荐）
+
+> 适用场景：tldraw 服务部署在家里 / 服务器，外网另一台电脑的 Cursor 想直接使用 MCP，无需 clone 整个仓库。
+
+### 9.1 发布机制
+
+每次推送 `v*` 格式的 Git Tag，GitHub Actions（`.github/workflows/release-mcp.yml`）会自动：
+
+1. 在 `packages/tldraw-selfhost-mcp/` 里构建（tsup bundle → 单文件 `dist/index.js`）
+2. 执行 `npm pack` 得到 `tldraw-selfhost-mcp-X.Y.Z.tgz`（压缩后约 3 KB）
+3. 上传到对应 Tag 的 GitHub Release Assets
+
+```bash
+# 发版操作（维护者）
+git tag v1.0.0 && git push origin v1.0.0
+# → CI 自动构建并发布 Release
+```
+
+### 9.2 前提：Cloudflare Access 配置（外网必须）
+
+tldraw 服务通过 Cloudflare Tunnel 暴露时，需要让 MCP 进程以「机器身份」通过 Access 验证。
+
+1. **创建 Service Token**  
+   Zero Trust 控制台 → **Access → Service Auth → Service Tokens** → 新建 → 保存 **Client ID** 和 **Client Secret**（只显示一次）
+
+2. **在保护站点的 Access Application 里增加一条 Allow 策略**  
+   条件选 **Service Auth → Service Token** → 选刚创建的 Token；保留原有 Email OTP 策略，两者 OR 关系并存（人用邮箱、机器用 Service Token）
+
+3. **把 ID/Secret 填入下面的 env**
+
+### 9.3 使用方 Cursor 配置
+
+编辑 `~/.cursor/mcp.json`（全局）或 `.cursor/mcp.json`（项目级）：
+
+```json
+{
+  "mcpServers": {
+    "tldraw": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "https://github.com/OWNER/REPO/releases/download/v1.0.0/tldraw-selfhost-mcp-1.0.0.tgz"
+      ],
+      "env": {
+        "TLDRAW_BASE_URL": "https://你的CF-Tunnel域名",
+        "MCP_TOKEN": "与服务端相同的 MCP_TOKEN",
+        "CF_ACCESS_CLIENT_ID": "CF Service Token Client ID",
+        "CF_ACCESS_CLIENT_SECRET": "CF Service Token Client Secret"
+      }
+    }
+  }
+}
+```
+
+> **升级 MCP 时**：把 `args` 里 URL 中的版本号（`v1.0.0` / `1.0.0`）替换为新 Tag 版本，保存即可。其余 env 无需改动。
+
+### 9.4 本地开发时（同机器直连）
+
+本地跑 tldraw 时可以继续用原来的方式，不必经过分发包：
+
+```json
+{
+  "mcpServers": {
+    "tldraw": {
+      "command": "npx",
+      "args": ["tsx", "src/mcp/server.ts"],
+      "env": {
+        "MCP_TOKEN": "your-token-here",
+        "TLDRAW_BASE_URL": "http://localhost:5858"
+      }
+    }
+  }
+}
+```
+
+---
+
+## 10. 实现步骤
 
 ### Step 1：安装依赖
 

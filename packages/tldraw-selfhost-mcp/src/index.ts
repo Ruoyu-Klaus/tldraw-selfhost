@@ -1,19 +1,21 @@
 /**
- * tldraw Selfhost — MCP Server
+ * tldraw Selfhost — MCP Server（可分发独立包）
  *
- * 运行方式：npm run mcp
- * 配置方式：~/.copilot/mcp-config.json 或 Claude Desktop 配置文件
+ * 使用方式：
+ *   npx -y https://github.com/OWNER/REPO/releases/download/vX.Y.Z/tldraw-selfhost-mcp-X.Y.Z.tgz
  *
  * 环境变量：
- *   MCP_TOKEN        鉴权 Token，需与 Fastify 服务端保持一致
- *   TLDRAW_BASE_URL  tldraw Fastify 服务地址（默认 http://localhost:5858）
+ *   TLDRAW_BASE_URL          tldraw Fastify 服务地址（默认 http://localhost:5858）
+ *   MCP_TOKEN                鉴权 Token，需与服务端保持一致
+ *   CF_ACCESS_CLIENT_ID      Cloudflare Access Service Token ID（外网必填）
+ *   CF_ACCESS_CLIENT_SECRET  Cloudflare Access Service Token Secret（外网必填）
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { WebSocket } from 'ws'
 import { z } from 'zod'
-import type { McpAction, McpRequest, McpResponse } from '../server/mcp-bridge'
+import type { McpAction, McpRequest, McpResponse } from './types'
 
 // ── 配置 ──────────────────────────────────────────────────────────────────────
 
@@ -21,7 +23,6 @@ const BASE_URL = (process.env.TLDRAW_BASE_URL ?? 'http://localhost:5858').replac
 const TOKEN = process.env.MCP_TOKEN ?? ''
 const WS_BASE = BASE_URL.replace(/^http/, 'ws')
 
-// Cloudflare Zero Trust Service Token（外网访问时需要）
 const CF_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID ?? ''
 const CF_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET ?? ''
 
@@ -34,7 +35,7 @@ if (BASE_URL !== 'http://localhost:5858' && (!CF_CLIENT_ID || !CF_CLIENT_SECRET)
 
 // ── WebSocket 请求转发 ────────────────────────────────────────────────────────
 
-let wsCache: Map<string, WebSocket> = new Map()
+const wsCache: Map<string, WebSocket> = new Map()
 
 function getWs(roomId: string): Promise<WebSocket> {
   const existing = wsCache.get(roomId)
@@ -45,7 +46,6 @@ function getWs(roomId: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const url = `${WS_BASE}/mcp-bridge?role=mcp&token=${encodeURIComponent(TOKEN)}&roomId=${encodeURIComponent(roomId)}`
 
-    // CF Zero Trust Service Token 头（本地开发时为空，外网时必须）
     const cfHeaders: Record<string, string> = {}
     if (CF_CLIENT_ID) cfHeaders['CF-Access-Client-Id'] = CF_CLIENT_ID
     if (CF_CLIENT_SECRET) cfHeaders['CF-Access-Client-Secret'] = CF_CLIENT_SECRET
@@ -63,10 +63,10 @@ function getWs(roomId: string): Promise<WebSocket> {
       resolve(ws)
     })
 
-    ws.on('close', (code, reason) => {
+    ws.on('close', (code) => {
       wsCache.delete(roomId)
-      if (code === 4001) reject(new Error(`鉴权失败：Token 错误 (4001)`))
-      if (code === 4002) reject(new Error(`缺少 roomId 参数 (4002)`))
+      if (code === 4001) reject(new Error('鉴权失败：Token 错误 (4001)'))
+      if (code === 4002) reject(new Error('缺少 roomId 参数 (4002)'))
     })
 
     ws.on('error', (err) => {
@@ -82,7 +82,6 @@ let reqCounter = 0
 async function bridgeRequest(roomId: string, action: McpAction, payload?: unknown): Promise<unknown> {
   const ws = await getWs(roomId)
   const id = `mcp-${++reqCounter}`
-
   const request: McpRequest = { type: 'request', id, action, payload }
 
   return new Promise((resolve, reject) => {
@@ -114,8 +113,6 @@ const server = new McpServer({
   version: '1.0.0',
 })
 
-// ── list_rooms ────────────────────────────────────────────────────────────────
-
 server.tool(
   'list_rooms',
   '列出 tldraw 服务器上所有画布房间（不需要浏览器已打开）',
@@ -125,15 +122,10 @@ server.tool(
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const { rooms } = await res.json() as { rooms: unknown[] }
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(rooms, null, 2),
-      }],
+      content: [{ type: 'text' as const, text: JSON.stringify(rooms, null, 2) }],
     }
   }
 )
-
-// ── get_context ───────────────────────────────────────────────────────────────
 
 server.tool(
   'get_context',
@@ -142,15 +134,10 @@ server.tool(
   async ({ roomId }) => {
     const data = await bridgeRequest(roomId, 'get_context')
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(data, null, 2),
-      }],
+      content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
     }
   }
 )
-
-// ── get_pages ─────────────────────────────────────────────────────────────────
 
 server.tool(
   'get_pages',
@@ -159,15 +146,10 @@ server.tool(
   async ({ roomId }) => {
     const data = await bridgeRequest(roomId, 'get_pages')
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(data, null, 2),
-      }],
+      content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
     }
   }
 )
-
-// ── get_shapes ────────────────────────────────────────────────────────────────
 
 server.tool(
   'get_shapes',
@@ -179,24 +161,17 @@ server.tool(
   async ({ roomId, pageId }) => {
     const data = await bridgeRequest(roomId, 'get_shapes', { pageId })
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(data, null, 2),
-      }],
+      content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
     }
   }
 )
-
-// ── create_shape ──────────────────────────────────────────────────────────────
 
 server.tool(
   'create_shape',
   '在 tldraw 画布上创建图形。支持 geo（矩形/椭圆等）、text、note、arrow。需要浏览器已打开该房间。',
   {
     roomId: z.string().describe('房间 ID'),
-    shapeType: z.enum(['geo', 'text', 'note', 'arrow']).describe(
-      'geo=几何图形, text=文字, note=便签, arrow=箭头'
-    ),
+    shapeType: z.enum(['geo', 'text', 'note', 'arrow']).describe('geo=几何图形, text=文字, note=便签, arrow=箭头'),
     x: z.number().describe('画布 X 坐标'),
     y: z.number().describe('画布 Y 坐标'),
     w: z.number().optional().describe('宽度（geo/note）'),
@@ -217,15 +192,10 @@ server.tool(
     const { roomId, ...rest } = payload
     const data = await bridgeRequest(roomId, 'create_shape', rest)
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(data, null, 2),
-      }],
+      content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
     }
   }
 )
-
-// ── update_shape ──────────────────────────────────────────────────────────────
 
 server.tool(
   'update_shape',
@@ -248,15 +218,10 @@ server.tool(
     const { roomId, ...rest } = payload
     const data = await bridgeRequest(roomId, 'update_shape', rest)
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(data, null, 2),
-      }],
+      content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
     }
   }
 )
-
-// ── delete_shapes ─────────────────────────────────────────────────────────────
 
 server.tool(
   'delete_shapes',
@@ -268,10 +233,7 @@ server.tool(
   async ({ roomId, shapeIds }) => {
     const data = await bridgeRequest(roomId, 'delete_shapes', { shapeIds })
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(data, null, 2),
-      }],
+      content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
     }
   }
 )

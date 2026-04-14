@@ -1,0 +1,27 @@
+{
+  "name": "tldraw-selfhost-mcp",
+  "version": "1.0.0",
+  "description": "MCP Server for tldraw selfhost — lets AI agents (Cursor, Copilot, Claude) control the canvas",
+  "license": "MIT",
+  "bin": {
+    "tldraw-selfhost-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "pack:release": "npm run build && npm pack"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ws": "^8.19.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3"
+  }
+}

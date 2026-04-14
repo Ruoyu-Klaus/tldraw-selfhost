@@ -10,7 +10,7 @@
     "build": "vite build",
     "start": "NODE_ENV=production tsx --env-file=.env.local src/server/server.ts",
     "deploy": "npm run build && pm2 start ecosystem.config.cjs",
-    "mcp": "tsx src/mcp/server.ts"
+    "mcp": "tsx packages/tldraw-selfhost-mcp/src/index.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",
