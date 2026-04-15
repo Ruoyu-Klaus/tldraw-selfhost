@@ -27,7 +27,7 @@ const assetStore: TLAssetStore = {
     const url = `/uploads/${encodeURIComponent(objectName)}`
 
     const res = await fetch(url, { method: 'PUT', body: file })
-    if (!res.ok) throw new Error(`上传失败: ${res.statusText}`)
+    if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`)
 
     return { src: url }
   },
@@ -82,7 +82,7 @@ function RoomPage({
     editor.registerExternalAssetHandler('url', unfurlBookmarkUrl)
   }, [])
 
-  // MCP Bridge：连接服务端中转，让 Copilot/Claude 等 AI agent 操作画布
+  // MCP bridge: connect to server so agents (Cursor, Copilot, etc.) can drive the editor
   useMcpBridge(mountedEditor, roomId)
 
   const handleExport = useCallback(() => {
@@ -146,7 +146,7 @@ function RoomPage({
   )
 }
 
-// ── 大厅页（创建 / 加入房间） ────────────────────────────────────────────────
+// --- Lobby (create / join room) ---------------------------------------------
 
 interface RoomInfo {
   id: string
@@ -165,7 +165,7 @@ function LobbyPage({ onEnter }: { onEnter: (roomId: string) => void }) {
         const data = await res.json()
         setRooms(data.rooms ?? [])
       } catch {
-        // 服务未就绪时静默失败
+        // Ignore when API is not ready yet
       }
     }
     fetchRooms()

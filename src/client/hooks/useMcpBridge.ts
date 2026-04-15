@@ -2,7 +2,7 @@ import { Editor, toRichText } from 'tldraw'
 import { useEffect } from 'react'
 import type { McpAction, McpRequest, McpResponse, McpContextPush } from '../../server/mcp-bridge'
 
-// ── WebSocket URL 生成 ────────────────────────────────────────────────────────
+// --- WebSocket URL -----------------------------------------------------------
 
 function getMcpBridgeUri(roomId: string): string {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -10,7 +10,7 @@ function getMcpBridgeUri(roomId: string): string {
   return `${protocol}//${location.host}/mcp-bridge?${params}`
 }
 
-// ── 请求处理：把 McpRequest 翻译成 editor API 调用 ───────────────────────────
+// --- Handle MCP requests → Editor API --------------------------------------
 
 async function handleRequest(editor: Editor, req: McpRequest): Promise<unknown> {
   switch (req.action) {
@@ -35,7 +35,7 @@ async function handleRequest(editor: Editor, req: McpRequest): Promise<unknown> 
       return shapes.map((s) => {
         const bounds = editor.getShapePageBounds(s.id)
         const props = s.props as Record<string, unknown>
-        return {
+        const row: Record<string, unknown> = {
           id: s.id,
           type: s.type,
           x: s.x,
@@ -49,6 +49,15 @@ async function handleRequest(editor: Editor, req: McpRequest): Promise<unknown> 
           color: 'color' in props ? props.color : undefined,
           geo: 'geo' in props ? props.geo : undefined,
         }
+        if (s.type === 'geo' || s.type === 'text' || s.type === 'note') {
+          if ('dash' in props) row.dash = props.dash
+          if ('size' in props) row.size = props.size
+          if ('font' in props) row.font = props.font
+          if ('align' in props) row.align = props.align
+          if ('verticalAlign' in props) row.verticalAlign = props.verticalAlign
+          if ('textAlign' in props) row.textAlign = props.textAlign
+        }
+        return row
       })
     }
 
@@ -64,9 +73,14 @@ async function handleRequest(editor: Editor, req: McpRequest): Promise<unknown> 
         geoType?: string
         fill?: string
         pageId?: string
+        dash?: string
+        size?: string
+        font?: string
+        align?: string
+        verticalAlign?: string
+        textAlign?: string
       }
 
-      // 切换到目标 page（如果指定）
       if (p.pageId && p.pageId !== editor.getCurrentPageId()) {
         editor.setCurrentPage(p.pageId as any)
       }
@@ -74,40 +88,58 @@ async function handleRequest(editor: Editor, req: McpRequest): Promise<unknown> 
       const id = `shape:${crypto.randomUUID()}` as any
 
       if (p.shapeType === 'geo') {
+        const d = editor.getShapeUtil('geo').getDefaultProps()
         editor.createShape({
           id,
           type: 'geo',
           x: p.x,
           y: p.y,
           props: {
+            ...d,
             geo: (p.geoType ?? 'rectangle') as any,
             w: p.w ?? 160,
             h: p.h ?? 80,
             color: (p.color ?? 'black') as any,
             fill: (p.fill ?? 'none') as any,
             richText: toRichText(p.text ?? ''),
+            dash: (p.dash ?? d.dash) as any,
+            size: (p.size ?? d.size) as any,
+            font: (p.font ?? d.font) as any,
+            align: (p.align ?? d.align) as any,
+            verticalAlign: (p.verticalAlign ?? d.verticalAlign) as any,
           },
         })
       } else if (p.shapeType === 'text') {
+        const d = editor.getShapeUtil('text').getDefaultProps()
         editor.createShape({
           id,
           type: 'text',
           x: p.x,
           y: p.y,
           props: {
+            ...d,
             richText: toRichText(p.text ?? ''),
             color: (p.color ?? 'black') as any,
+            size: (p.size ?? d.size) as any,
+            font: (p.font ?? d.font) as any,
+            textAlign: (p.textAlign ?? d.textAlign) as any,
           },
         })
       } else if (p.shapeType === 'note') {
+        const d = editor.getShapeUtil('note').getDefaultProps()
         editor.createShape({
           id,
           type: 'note',
           x: p.x,
           y: p.y,
           props: {
+            ...d,
             richText: toRichText(p.text ?? ''),
             color: (p.color ?? 'yellow') as any,
+            size: (p.size ?? d.size) as any,
+            font: (p.font ?? d.font) as any,
+            align: (p.align ?? d.align) as any,
+            verticalAlign: (p.verticalAlign ?? d.verticalAlign) as any,
           },
         })
       } else if (p.shapeType === 'arrow') {
@@ -121,7 +153,7 @@ async function handleRequest(editor: Editor, req: McpRequest): Promise<unknown> 
           },
         })
       } else {
-        throw new Error(`不支持的 shapeType: ${p.shapeType}`)
+        throw new Error(`Unsupported shapeType: ${p.shapeType}`)
       }
 
       return { shapeId: id }
@@ -136,14 +168,38 @@ async function handleRequest(editor: Editor, req: McpRequest): Promise<unknown> 
         h?: number
         text?: string
         color?: string
+        dash?: string
+        size?: string
+        font?: string
+        align?: string
+        verticalAlign?: string
+        textAlign?: string
       }
 
       const shape = editor.getShape(p.shapeId as any)
-      if (!shape) throw new Error(`找不到 shape: ${p.shapeId}`)
+      if (!shape) throw new Error(`Shape not found: ${p.shapeId}`)
 
       const partialProps: Record<string, unknown> = {}
       if (p.color !== undefined) partialProps.color = p.color
       if (p.text !== undefined) partialProps.richText = toRichText(p.text)
+
+      const t = shape.type
+      if (t === 'geo') {
+        if (p.dash !== undefined) partialProps.dash = p.dash
+        if (p.size !== undefined) partialProps.size = p.size
+        if (p.font !== undefined) partialProps.font = p.font
+        if (p.align !== undefined) partialProps.align = p.align
+        if (p.verticalAlign !== undefined) partialProps.verticalAlign = p.verticalAlign
+      } else if (t === 'text') {
+        if (p.size !== undefined) partialProps.size = p.size
+        if (p.font !== undefined) partialProps.font = p.font
+        if (p.textAlign !== undefined) partialProps.textAlign = p.textAlign
+      } else if (t === 'note') {
+        if (p.size !== undefined) partialProps.size = p.size
+        if (p.font !== undefined) partialProps.font = p.font
+        if (p.align !== undefined) partialProps.align = p.align
+        if (p.verticalAlign !== undefined) partialProps.verticalAlign = p.verticalAlign
+      }
 
       editor.updateShape({
         id: shape.id,
@@ -153,7 +209,6 @@ async function handleRequest(editor: Editor, req: McpRequest): Promise<unknown> 
         props: partialProps,
       })
 
-      // 如果指定了 w/h，用 resizeShape
       if (p.w !== undefined || p.h !== undefined) {
         const bounds = editor.getShapePageBounds(shape)
         if (bounds) {
@@ -173,12 +228,12 @@ async function handleRequest(editor: Editor, req: McpRequest): Promise<unknown> 
     }
 
     default: {
-      throw new Error(`未知 action: ${(req as any).action}`)
+      throw new Error(`Unknown action: ${(req as any).action}`)
     }
   }
 }
 
-// ── useMcpBridge hook ─────────────────────────────────────────────────────────
+// --- useMcpBridge hook --------------------------------------------------------
 
 export function useMcpBridge(editor: Editor | null, roomId: string) {
   useEffect(() => {
@@ -219,12 +274,11 @@ export function useMcpBridge(editor: Editor | null, roomId: string) {
 
       ws.onclose = () => {
         if (destroyed) return
-        // 断线后 3 秒重连
         setTimeout(connect, 3000)
       }
 
       ws.onerror = () => {
-        // onclose 会紧跟触发，在那里处理重连
+        // onclose follows; reconnect there
       }
     }
 
@@ -243,7 +297,6 @@ export function useMcpBridge(editor: Editor | null, roomId: string) {
 
     connect()
 
-    // 当用户切换 page 时，主动上报新的 context
     const unsubscribe = ed.store.listen(
       () => pushContext(),
       { scope: 'session' }

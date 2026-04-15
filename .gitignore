@@ -7,3 +7,4 @@ logs/
 .env
 .env.local
 .env.production
+**/*.tgz

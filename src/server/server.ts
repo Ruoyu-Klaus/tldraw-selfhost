@@ -18,19 +18,19 @@ const app = fastify({ logger: { level: IS_PROD ? 'info' : 'warn' } })
 app.register(websocketPlugin)
 app.register(cors, { origin: '*' })
 
-// 生产模式：直接托管前端构建产物，开发模式下交给 Vite dev server
+// Production: serve Vite build; dev: use Vite dev server separately
 const CLIENT_DIST = resolve('./dist/client')
 if (IS_PROD && existsSync(CLIENT_DIST)) {
   app.register(staticPlugin, { root: CLIENT_DIST, prefix: '/', index: 'index.html' })
 }
 
 app.register(async (app) => {
-  // ── WebSocket：多人实时同步入口 ────────────────────────────────────────
+  // --- WebSocket: multi-user sync -----------------------------------------
   app.get('/connect/:roomId', { websocket: true }, async (socket, req) => {
     const roomId = (req.params as Record<string, string>).roomId
     const sessionId = (req.query as Record<string, string>)?.sessionId
 
-    // 必须在任何异步操作前先注册 message 监听，否则早期消息会丢失
+    // Register message listener before any await so early messages are not lost
     const caughtMessages: RawData[] = []
     const collectMessages = (msg: RawData) => caughtMessages.push(msg)
     socket.on('message', collectMessages)
@@ -40,13 +40,12 @@ app.register(async (app) => {
 
     socket.off('message', collectMessages)
 
-    // 回放在房间加载前收到的消息
     for (const msg of caughtMessages) {
       socket.emit('message', msg)
     }
   })
 
-  // ── 资源上传/下载（图片、视频等大文件存本地磁盘）─────────────────────
+  // --- Asset upload / download (local disk) --------------------------------
   app.addContentTypeParser('*', (_, __, done) => done(null))
 
   app.put('/uploads/:id', async (req, res) => {
@@ -59,7 +58,6 @@ app.register(async (app) => {
     const id = (req.params as Record<string, string>).id
     try {
       const data = await loadAsset(id)
-      // 防止用户上传的 SVG 触发 XSS
       res.header('Content-Security-Policy', "default-src 'none'")
       res.header('X-Content-Type-Options', 'nosniff')
       res.send(data)
@@ -72,24 +70,22 @@ app.register(async (app) => {
     }
   })
 
-  // ── 书签 unfurl（链接预览）────────────────────────────────────────────
-  // image / favicon 已在 unfurl.ts 中下载到本地 .assets/，返回本地 /uploads/ 路径
+  // --- Bookmark unfurl (images/favicons cached under .assets/, served via /uploads/)
   app.get('/unfurl', async (req, res) => {
     const url = (req.query as Record<string, string>).url
     res.send(await unfurl(url))
   })
 
-  // ── 房间列表（磁盘上所有房间 + 活跃状态）────────────────────────────
+  // --- Room list (disk + in-memory active flag) ----------------------------
   app.get('/api/rooms', async (_req, res) => {
     res.send({ rooms: listRooms() })
   })
 
-  // ── 健康检查 ──────────────────────────────────────────────────────────
   app.get('/api/health', async (_req, res) => {
     res.send({ ok: true, mode: IS_PROD ? 'production' : 'development' })
   })
 
-  // ── MCP Bridge：MCP Server ↔ 浏览器 editor 的 WebSocket 中转 ────────
+  // --- MCP bridge: MCP server ↔ browser editor -----------------------------
   app.get('/mcp-bridge', { websocket: true }, async (socket, req) => {
     const query = req.query as Record<string, string>
     const { role, roomId, token } = query
@@ -100,7 +96,6 @@ app.register(async (app) => {
     }
 
     if (role === 'mcp') {
-      // MCP Server 连接：校验 Bearer Token
       const expected = process.env.MCP_TOKEN
       if (!expected) {
         socket.close(4001, 'MCP_TOKEN not configured on server')
@@ -112,7 +107,6 @@ app.register(async (app) => {
       }
       mcpBridge.registerMcp(roomId, socket)
     } else {
-      // 浏览器连接：校验 Origin，必须与当前服务同源
       const origin = req.headers.origin ?? ''
       const host = req.headers.host ?? ''
       if (!isAllowedOrigin(origin, host)) {
@@ -124,25 +118,22 @@ app.register(async (app) => {
   })
 })
 
-// SPA fallback：生产模式下所有未匹配的路由都返回 index.html
+// SPA fallback in production
 if (IS_PROD && existsSync(CLIENT_DIST)) {
   app.setNotFoundHandler(async (_req, res) => {
     res.sendFile('index.html', CLIENT_DIST)
   })
 }
 
-// ── 工具函数 ──────────────────────────────────────────────────────────────────
+// --- Helpers -----------------------------------------------------------------
 
 /**
- * 校验浏览器 WebSocket 连接的 Origin，防止外部页面冒充浏览器客户端。
+ * Validate browser WebSocket Origin to block foreign pages from acting as the editor client.
  *
- * 允许规则：
- *  - origin 与 host 同主机名（生产）
- *  - origin 为空（某些 WebSocket 客户端不发 Origin，如 wscat 本地调试）
- *  - host 为 localhost / 127.0.0.1（本地开发）
+ * Allowed: empty Origin (e.g. wscat); localhost / 127.0.0.1; same hostname as Host header.
  */
 function isAllowedOrigin(origin: string, host: string): boolean {
-  if (!origin) return true          // 无 Origin 头，放行（wscat/本地工具）
+  if (!origin) return true
 
   const hostname = host.split(':')[0]
   if (hostname === 'localhost' || hostname === '127.0.0.1') return true
@@ -160,10 +151,10 @@ app.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
     console.error(err)
     process.exit(1)
   }
-  console.log(`✅ tldraw-selfhost 服务启动`)
-  console.log(`   后端监听：http://0.0.0.0:${PORT}`)
-  console.log(`   数据目录：.rooms/（画布 SQLite）  .assets/（图片/视频）`)
+  console.log(`✅ tldraw-selfhost listening`)
+  console.log(`   http://0.0.0.0:${PORT}`)
+  console.log(`   data: .rooms/ (SQLite)  .assets/ (media)`)
   if (!IS_PROD) {
-    console.log(`   前端开发：请同时运行 npm run dev:client  →  http://localhost:5757`)
+    console.log(`   dev client: npm run dev:client → http://localhost:5757`)
   }
 })

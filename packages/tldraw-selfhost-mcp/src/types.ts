@@ -1,4 +1,4 @@
-// 与主仓 src/server/mcp-bridge.ts 保持一致的类型定义（仅类型，无运行时依赖）
+// Types aligned with repo src/server/mcp-bridge.ts (types only; no runtime import from app)
 
 export interface McpRequest {
   type: 'request'

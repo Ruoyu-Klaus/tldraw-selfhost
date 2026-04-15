@@ -264,7 +264,8 @@ interface McpContextPush {
     required: ['roomId']
   }
 }
-// 返回：{ shapes: [{ id, type, x, y, w, h, props, ... }] }
+// 返回：数组，每项含 id, type, x, y, rotation, w, h, text, color, geo（若有）；
+// geo/text/note 另含 dash, size, font, align, verticalAlign, textAlign（视类型存在）
 ```
 
 ### `create_shape`
@@ -282,7 +283,7 @@ interface McpContextPush {
       pageId: { type: 'string', description: '目标 page（不填则用当前激活 page）' },
       shapeType: {
         type: 'string',
-        enum: ['geo', 'text', 'note', 'arrow', 'draw'],
+        enum: ['geo', 'text', 'note', 'arrow'],
         description: 'geo = 矩形/椭圆等, text = 文字, note = 便签, arrow = 箭头'
       },
       x: { type: 'number', description: '画布坐标 X' },
@@ -302,9 +303,19 @@ interface McpContextPush {
       },
       fill: {
         type: 'string',
-        enum: ['none', 'semi', 'solid', 'pattern'],
-        description: '填充样式'
-      }
+        enum: ['none', 'semi', 'solid', 'pattern', 'fill', 'lined-fill'],
+        description: '填充样式（仅 geo）'
+      },
+      dash: {
+        type: 'string',
+        enum: ['solid', 'dashed', 'dotted', 'draw'],
+        description: '轮廓线型（仅 geo）'
+      },
+      size: { type: 'string', enum: ['s', 'm', 'l', 'xl'], description: '线粗/字号档位（geo、text、note）' },
+      font: { type: 'string', enum: ['draw', 'sans', 'serif', 'mono'], description: '字体（geo、text、note）' },
+      align: { type: 'string', enum: ['start', 'middle', 'end'], description: '文字水平对齐（仅 geo、note）' },
+      verticalAlign: { type: 'string', enum: ['start', 'middle', 'end'], description: '文字垂直对齐（仅 geo、note）' },
+      textAlign: { type: 'string', enum: ['start', 'middle', 'end'], description: '水平对齐（仅 text）' }
     },
     required: ['roomId', 'shapeType', 'x', 'y']
   }
@@ -330,7 +341,13 @@ interface McpContextPush {
       w: { type: 'number' },
       h: { type: 'number' },
       text: { type: 'string' },
-      color: { type: 'string' }
+      color: { type: 'string' },
+      dash: { type: 'string', enum: ['solid', 'dashed', 'dotted', 'draw'], description: '仅 geo' },
+      size: { type: 'string', enum: ['s', 'm', 'l', 'xl'] },
+      font: { type: 'string', enum: ['draw', 'sans', 'serif', 'mono'] },
+      align: { type: 'string', enum: ['start', 'middle', 'end'], description: '仅 geo、note' },
+      verticalAlign: { type: 'string', enum: ['start', 'middle', 'end'], description: '仅 geo、note' },
+      textAlign: { type: 'string', enum: ['start', 'middle', 'end'], description: '仅 text' }
     },
     required: ['roomId', 'shapeId']
   }

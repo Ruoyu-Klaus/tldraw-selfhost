@@ -1,8 +1,8 @@
 import type { WebSocket } from 'ws'
 
-// ── 消息类型定义 ──────────────────────────────────────────────────────────────
+// --- Message types -----------------------------------------------------------
 
-/** MCP Server → Browser：操作请求 */
+/** MCP server → browser: operation request */
 export interface McpRequest {
   type: 'request'
   id: string
@@ -18,7 +18,7 @@ export type McpAction =
   | 'update_shape'
   | 'delete_shapes'
 
-/** Browser → MCP Server：操作响应 */
+/** Browser → MCP server: operation response */
 export interface McpResponse {
   type: 'response'
   id: string
@@ -27,7 +27,7 @@ export interface McpResponse {
   error?: string
 }
 
-/** Browser → Fastify：主动上报当前 room/page 状态 */
+/** Browser → Fastify: push current room / page context */
 export interface McpContextPush {
   type: 'context'
   roomId: string
@@ -38,7 +38,7 @@ export interface McpContextPush {
 
 type IncomingBrowserMessage = McpResponse | McpContextPush
 
-// ── 每个房间的 Bridge 状态 ────────────────────────────────────────────────────
+// --- Per-room bridge state ---------------------------------------------------
 
 interface PendingRequest {
   resolve: (data: unknown) => void
@@ -47,17 +47,17 @@ interface PendingRequest {
 }
 
 interface BridgeRoom {
-  /** 浏览器端 WebSocket（tldraw editor 所在的 tab） */
+  /** Browser WebSocket (tab running the tldraw editor) */
   browserSocket: WebSocket | null
-  /** MCP Server 端 WebSocket（一个 room 同时只有一个 MCP 连接） */
+  /** MCP server WebSocket (one active MCP connection per room) */
   mcpSocket: WebSocket | null
-  /** 浏览器最后上报的 context（room/page 信息） */
+  /** Last context pushed from the browser */
   context: Omit<McpContextPush, 'type'> | null
-  /** 等待浏览器响应的请求队列，key = request.id */
+  /** Pending requests awaiting browser response, keyed by request id */
   pending: Map<string, PendingRequest>
 }
 
-// ── McpBridgeManager ──────────────────────────────────────────────────────────
+// --- McpBridgeManager --------------------------------------------------------
 
 const REQUEST_TIMEOUT_MS = 10_000
 
@@ -76,18 +76,18 @@ class McpBridgeManager {
     return this.rooms.get(roomId)!
   }
 
-  // ── 注册浏览器客户端 ──────────────────────────────────────────────────────
+  // --- Register browser client ---------------------------------------------
 
   registerBrowser(roomId: string, socket: WebSocket) {
     const room = this.getOrCreateRoom(roomId)
 
-    // 同一个 room 只保留最新的浏览器连接
+    // Keep only the newest browser connection per room
     if (room.browserSocket && room.browserSocket.readyState === 1 /* OPEN */) {
       room.browserSocket.close(1001, 'replaced by newer browser client')
     }
     room.browserSocket = socket
 
-    console.log(`[mcp-bridge] 浏览器连接 room=${roomId}`)
+    console.log(`[mcp-bridge] browser connected room=${roomId}`)
 
     socket.on('message', (raw) => {
       let msg: IncomingBrowserMessage
@@ -98,7 +98,6 @@ class McpBridgeManager {
       }
 
       if (msg.type === 'context') {
-        // 缓存浏览器上报的 room/page context
         room.context = {
           roomId: msg.roomId,
           pageId: msg.pageId,
@@ -109,7 +108,6 @@ class McpBridgeManager {
       }
 
       if (msg.type === 'response') {
-        // 找到对应的 pending request 并 resolve
         const pending = room.pending.get(msg.id)
         if (!pending) return
 
@@ -125,7 +123,7 @@ class McpBridgeManager {
     })
 
     socket.on('close', () => {
-      console.log(`[mcp-bridge] 浏览器断开 room=${roomId}`)
+      console.log(`[mcp-bridge] browser disconnected room=${roomId}`)
       if (room.browserSocket === socket) {
         room.browserSocket = null
       }
@@ -133,11 +131,11 @@ class McpBridgeManager {
     })
 
     socket.on('error', (err) => {
-      console.warn(`[mcp-bridge] 浏览器 socket 错误 room=${roomId}`, err.message)
+      console.warn(`[mcp-bridge] browser socket error room=${roomId}`, err.message)
     })
   }
 
-  // ── 注册 MCP Server 客户端 ────────────────────────────────────────────────
+  // --- Register MCP server client ------------------------------------------
 
   registerMcp(roomId: string, socket: WebSocket) {
     const room = this.getOrCreateRoom(roomId)
@@ -147,9 +145,9 @@ class McpBridgeManager {
     }
     room.mcpSocket = socket
 
-    console.log(`[mcp-bridge] MCP Server 连接 room=${roomId}`)
+    console.log(`[mcp-bridge] MCP server connected room=${roomId}`)
 
-    // MCP Server → 浏览器：收到请求后转发，浏览器的响应再原路返回
+    // Forward MCP → browser; browser response goes back to MCP
     socket.on('message', (raw) => {
       let req: McpRequest
       try {
@@ -165,13 +163,12 @@ class McpBridgeManager {
           type: 'response',
           id: req.id,
           ok: false,
-          error: `room "${roomId}" 没有浏览器客户端连接，请先在浏览器中打开该房间`,
+          error: `room "${roomId}" has no browser client; open this room in the browser first`,
         }
         socket.send(JSON.stringify(errResp))
         return
       }
 
-      // 注册一个一次性监听：等待浏览器返回对应 id 的响应，再转发给 MCP Server
       const onBrowserMessage = (browserRaw: Buffer) => {
         let resp: McpResponse
         try {
@@ -181,7 +178,6 @@ class McpBridgeManager {
         }
         if (resp.type !== 'response' || resp.id !== req.id) return
 
-        // 找到了匹配的响应，移除监听并转发
         browser.off('message', onBrowserMessage)
         clearTimeout(timer)
         if (socket.readyState === 1) socket.send(JSON.stringify(resp))
@@ -193,7 +189,7 @@ class McpBridgeManager {
           type: 'response',
           id: req.id,
           ok: false,
-          error: `请求超时 (10s): ${req.action}`,
+          error: `Request timeout (10s): ${req.action}`,
         }
         if (socket.readyState === 1) socket.send(JSON.stringify(errResp))
       }, 10_000)
@@ -203,7 +199,7 @@ class McpBridgeManager {
     })
 
     socket.on('close', () => {
-      console.log(`[mcp-bridge] MCP Server 断开 room=${roomId}`)
+      console.log(`[mcp-bridge] MCP server disconnected room=${roomId}`)
       if (room.mcpSocket === socket) {
         room.mcpSocket = null
       }
@@ -211,25 +207,25 @@ class McpBridgeManager {
     })
 
     socket.on('error', (err) => {
-      console.warn(`[mcp-bridge] MCP socket 错误 room=${roomId}`, err.message)
+      console.warn(`[mcp-bridge] MCP socket error room=${roomId}`, err.message)
     })
   }
 
-  // ── 向浏览器发送请求并等待响应 ────────────────────────────────────────────
+  // --- Forward request to browser and await response -----------------------
 
   forward(roomId: string, request: McpRequest): Promise<unknown> {
     const room = this.rooms.get(roomId)
 
     if (!room?.browserSocket || room.browserSocket.readyState !== 1) {
       return Promise.reject(
-        new Error(`room "${roomId}" 没有浏览器客户端连接，请先在浏览器中打开该房间`)
+        new Error(`room "${roomId}" has no browser client; open this room in the browser first`)
       )
     }
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         room.pending.delete(request.id)
-        reject(new Error(`请求超时（${REQUEST_TIMEOUT_MS}ms）: ${request.action}`))
+        reject(new Error(`Request timeout (${REQUEST_TIMEOUT_MS}ms): ${request.action}`))
       }, REQUEST_TIMEOUT_MS)
 
       room.pending.set(request.id, { resolve, reject, timer })
@@ -237,20 +233,20 @@ class McpBridgeManager {
     })
   }
 
-  // ── 获取浏览器上报的 context ──────────────────────────────────────────────
+  // --- Last pushed context ---------------------------------------------------
 
   getContext(roomId: string) {
     return this.rooms.get(roomId)?.context ?? null
   }
 
-  // ── 判断 room 是否有浏览器连接 ───────────────────────────────────────────
+  // --- Browser connected? ----------------------------------------------------
 
   hasBrowser(roomId: string): boolean {
     const room = this.rooms.get(roomId)
     return !!room?.browserSocket && room.browserSocket.readyState === 1
   }
 
-  // ── 内部清理 ──────────────────────────────────────────────────────────────
+  // --- Internal cleanup ------------------------------------------------------
 
   private cleanupRoomIfEmpty(roomId: string) {
     const room = this.rooms.get(roomId)
@@ -261,5 +257,5 @@ class McpBridgeManager {
   }
 }
 
-// 单例：整个 Fastify 进程共享同一个 Bridge 实例
+/** Singleton shared by the Fastify process */
 export const mcpBridge = new McpBridgeManager()

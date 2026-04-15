@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import { Readable } from 'stream'
 
-// 图片、视频等资源持久化到本地 .assets/ 目录
+// Media files persisted under .assets/
 const DIR = resolve('./.assets')
 
 export async function storeAsset(id: string, stream: Readable): Promise<void> {

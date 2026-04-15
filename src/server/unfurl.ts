@@ -5,8 +5,7 @@ import { unfurl as _unfurl } from 'unfurl.js'
 
 const ASSETS_DIR = resolve('./.assets')
 
-// ── 工具：把外部图片下载到本地 .assets/，返回本地路径 ─────────────────────
-// 这样浏览器只需加载我们自己的服务，完全绕过目标站点的 CORP 头限制。
+// Download remote images into .assets/ and return a local /uploads/ URL (avoids third-party CORP issues).
 async function downloadToLocal(srcUrl: string | undefined): Promise<string | undefined> {
   if (!srcUrl) return undefined
 
@@ -28,7 +27,6 @@ async function downloadToLocal(srcUrl: string | undefined): Promise<string | und
     const buffer = Buffer.from(await res.arrayBuffer())
     if (buffer.length === 0) return undefined
 
-    // 扩展名：优先从 Content-Type 推断
     const extByMime: Record<string, string> = {
       'image/png': '.png',
       'image/jpeg': '.jpg',
@@ -41,29 +39,26 @@ async function downloadToLocal(srcUrl: string | undefined): Promise<string | und
     const mime = contentType.split(';')[0].trim()
     const ext = extByMime[mime] || extname(new URL(srcUrl).pathname) || '.png'
 
-    // 用 URL 的 SHA-256 做文件名，保证不同 URL 不会碰撞
     const hash = createHash('sha256').update(srcUrl).digest('hex').slice(0, 16)
     const filename = `unfurl-${hash}${ext}`
     const filepath = join(ASSETS_DIR, filename)
 
-    // 文件已存在则跳过下载，直接复用缓存
     const alreadyExists = await access(filepath).then(() => true).catch(() => false)
     if (!alreadyExists) {
       await mkdir(ASSETS_DIR, { recursive: true })
       await writeFile(filepath, buffer)
-      console.log('[unfurl] 已下载并缓存:', filename)
+      console.log('[unfurl] cached:', filename)
     } else {
-      console.log('[unfurl] 复用已有缓存:', filename)
+      console.log('[unfurl] cache hit:', filename)
     }
 
     return `/uploads/${encodeURIComponent(filename)}`
   } catch (e) {
-    console.warn('[unfurl] 下载失败:', srcUrl, (e as Error).message)
+    console.warn('[unfurl] download failed:', srcUrl, (e as Error).message)
     return undefined
   }
 }
 
-// ── 工具：把可能是相对路径的 URL 解析为绝对 URL ──────────────────────────
 function resolveUrl(raw: string | undefined, base: string): string | undefined {
   if (!raw) return undefined
   try {
@@ -73,11 +68,7 @@ function resolveUrl(raw: string | undefined, base: string): string | undefined {
   }
 }
 
-// ── 工具：用多种策略可靠获取 favicon ────────────────────────────────────────
-// 策略顺序：
-// 1. unfurl.js 解析到的 favicon（修正相对路径后）
-// 2. 直接请求 /favicon.ico
-// 3. DuckDuckGo favicon API（兜底，几乎 100% 有效）
+// Favicon resolution order: unfurl result → /favicon.ico → DuckDuckGo icons API
 async function resolveFavicon(
   rawFavicon: string | undefined,
   pageUrl: string
@@ -85,9 +76,9 @@ async function resolveFavicon(
   const origin = new URL(pageUrl).origin
 
   const candidates: (string | undefined)[] = [
-    resolveUrl(rawFavicon, pageUrl),                      // 1. unfurl.js 结果
-    `${origin}/favicon.ico`,                              // 2. 默认 favicon.ico
-    `https://icons.duckduckgo.com/ip3/${new URL(pageUrl).hostname}.ico`, // 3. DDG API
+    resolveUrl(rawFavicon, pageUrl),
+    `${origin}/favicon.ico`,
+    `https://icons.duckduckgo.com/ip3/${new URL(pageUrl).hostname}.ico`,
   ]
 
   for (const url of candidates) {
@@ -98,7 +89,6 @@ async function resolveFavicon(
   return undefined
 }
 
-// ── 主函数 ────────────────────────────────────────────────────────────────
 export async function unfurl(url: string) {
   let title: string | undefined
   let description: string | undefined
@@ -114,10 +104,9 @@ export async function unfurl(url: string) {
       result.twitter_card?.images?.[0]?.url
     rawFavicon = result.favicon
   } catch (e) {
-    console.warn('[unfurl] 解析页面失败:', url, (e as Error).message)
+    console.warn('[unfurl] parse failed:', url, (e as Error).message)
   }
 
-  // 并行处理 OG 图片和 favicon，互不阻塞
   const [image, favicon] = await Promise.all([
     downloadToLocal(resolveUrl(rawImage, url)),
     resolveFavicon(rawFavicon, url),

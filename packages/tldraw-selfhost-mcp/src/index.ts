@@ -1,14 +1,14 @@
 /**
- * tldraw Selfhost — MCP Server（可分发独立包）
+ * tldraw Selfhost — MCP Server (distributable standalone package)
  *
- * 使用方式：
+ * Usage:
  *   npx -y https://github.com/OWNER/REPO/releases/download/vX.Y.Z/tldraw-selfhost-mcp-X.Y.Z.tgz
  *
- * 环境变量：
- *   TLDRAW_BASE_URL          tldraw Fastify 服务地址（默认 http://localhost:5858）
- *   MCP_TOKEN                鉴权 Token，需与服务端保持一致
- *   CF_ACCESS_CLIENT_ID      Cloudflare Access Service Token ID（外网必填）
- *   CF_ACCESS_CLIENT_SECRET  Cloudflare Access Service Token Secret（外网必填）
+ * Environment:
+ *   TLDRAW_BASE_URL          tldraw Fastify base URL (default http://localhost:5858)
+ *   MCP_TOKEN                Auth token; must match server
+ *   CF_ACCESS_CLIENT_ID      Cloudflare Access service token ID (required when exposed publicly)
+ *   CF_ACCESS_CLIENT_SECRET  Cloudflare Access service token secret
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -17,7 +17,7 @@ import { WebSocket } from 'ws'
 import { z } from 'zod'
 import type { McpAction, McpRequest, McpResponse } from './types'
 
-// ── 配置 ──────────────────────────────────────────────────────────────────────
+// --- Config -----------------------------------------------------------------
 
 const BASE_URL = (process.env.TLDRAW_BASE_URL ?? 'http://localhost:5858').replace(/\/$/, '')
 const TOKEN = process.env.MCP_TOKEN ?? ''
@@ -27,13 +27,15 @@ const CF_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID ?? ''
 const CF_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET ?? ''
 
 if (!TOKEN) {
-  process.stderr.write('[tldraw-mcp] 警告: MCP_TOKEN 未设置，连接会被服务端拒绝\n')
+  process.stderr.write('[tldraw-mcp] warning: MCP_TOKEN is unset; server will reject connections\n')
 }
 if (BASE_URL !== 'http://localhost:5858' && (!CF_CLIENT_ID || !CF_CLIENT_SECRET)) {
-  process.stderr.write('[tldraw-mcp] 警告: 外网模式建议设置 CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET\n')
+  process.stderr.write(
+    '[tldraw-mcp] warning: public URL mode — set CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET\n'
+  )
 }
 
-// ── WebSocket 请求转发 ────────────────────────────────────────────────────────
+// --- WebSocket bridge ---------------------------------------------------------
 
 const wsCache: Map<string, WebSocket> = new Map()
 
@@ -54,7 +56,7 @@ function getWs(roomId: string): Promise<WebSocket> {
 
     const timeout = setTimeout(() => {
       ws.terminate()
-      reject(new Error(`连接超时: ${url}`))
+      reject(new Error(`WebSocket connect timeout: ${url}`))
     }, 8000)
 
     ws.on('open', () => {
@@ -65,8 +67,8 @@ function getWs(roomId: string): Promise<WebSocket> {
 
     ws.on('close', (code) => {
       wsCache.delete(roomId)
-      if (code === 4001) reject(new Error('鉴权失败：Token 错误 (4001)'))
-      if (code === 4002) reject(new Error('缺少 roomId 参数 (4002)'))
+      if (code === 4001) reject(new Error('Auth failed: invalid token (4001)'))
+      if (code === 4002) reject(new Error('Missing roomId query (4002)'))
     })
 
     ws.on('error', (err) => {
@@ -86,19 +88,23 @@ async function bridgeRequest(roomId: string, action: McpAction, payload?: unknow
 
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`请求超时 (10s): ${action}`))
+      reject(new Error(`Request timeout (10s): ${action}`))
     }, 10_000)
 
     function onMessage(raw: Buffer) {
       let msg: McpResponse
-      try { msg = JSON.parse(raw.toString()) } catch { return }
+      try {
+        msg = JSON.parse(raw.toString())
+      } catch {
+        return
+      }
       if (msg.type !== 'response' || msg.id !== id) return
 
       clearTimeout(timer)
       ws.off('message', onMessage)
 
       if (msg.ok) resolve(msg.data)
-      else reject(new Error(msg.error ?? '浏览器返回错误'))
+      else reject(new Error(msg.error ?? 'Browser returned an error'))
     }
 
     ws.on('message', onMessage)
@@ -106,7 +112,33 @@ async function bridgeRequest(roomId: string, action: McpAction, payload?: unknow
   })
 }
 
-// ── MCP Server 定义 ───────────────────────────────────────────────────────────
+// --- Style enums (aligned with @tldraw/tlschema for geo / text / note) -----
+
+const zDash = z.enum(['solid', 'dashed', 'dotted', 'draw'])
+const zSize = z.enum(['s', 'm', 'l', 'xl'])
+const zFont = z.enum(['draw', 'sans', 'serif', 'mono'])
+const zAlignH = z.enum(['start', 'middle', 'end'])
+const zVerticalAlign = z.enum(['start', 'middle', 'end'])
+
+const stylePropsCreate = {
+  dash: zDash.optional().describe('Geo only: outline dash style'),
+  size: zSize.optional().describe('Geo / text / note: stroke or text size token'),
+  font: zFont.optional().describe('Geo / text / note: font style'),
+  align: zAlignH.optional().describe('Geo / note horizontal text align (use textAlign for text shapes)'),
+  verticalAlign: zVerticalAlign.optional().describe('Geo / note: vertical text align'),
+  textAlign: zAlignH.optional().describe('Text only: horizontal align'),
+}
+
+const stylePropsUpdate = {
+  dash: zDash.optional().describe('Geo only'),
+  size: zSize.optional(),
+  font: zFont.optional(),
+  align: zAlignH.optional().describe('Geo / note only'),
+  verticalAlign: zVerticalAlign.optional().describe('Geo / note only'),
+  textAlign: zAlignH.optional().describe('Text only'),
+}
+
+// --- MCP server ---------------------------------------------------------------
 
 const server = new McpServer({
   name: 'tldraw-selfhost',
@@ -115,12 +147,12 @@ const server = new McpServer({
 
 server.tool(
   'list_rooms',
-  '列出 tldraw 服务器上所有画布房间（不需要浏览器已打开）',
+  'List all canvas rooms on the tldraw server (no browser required).',
   {},
   async () => {
     const res = await fetch(`${BASE_URL}/api/rooms`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const { rooms } = await res.json() as { rooms: unknown[] }
+    const { rooms } = (await res.json()) as { rooms: unknown[] }
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(rooms, null, 2) }],
     }
@@ -129,8 +161,8 @@ server.tool(
 
 server.tool(
   'get_context',
-  '获取浏览器当前激活的 page 信息（roomId、pageId、pageName、pageCount）。需要浏览器已打开该房间。',
-  { roomId: z.string().describe('房间 ID') },
+  'Get active page info from the browser (pageId, pageName, pageCount). Requires a browser tab open for this room.',
+  { roomId: z.string().describe('Room ID') },
   async ({ roomId }) => {
     const data = await bridgeRequest(roomId, 'get_context')
     return {
@@ -141,8 +173,8 @@ server.tool(
 
 server.tool(
   'get_pages',
-  '获取指定房间的所有页面列表（id 和 name）。需要浏览器已打开该房间。',
-  { roomId: z.string().describe('房间 ID') },
+  'List all pages (id and name) for the room. Requires a browser tab open for this room.',
+  { roomId: z.string().describe('Room ID') },
   async ({ roomId }) => {
     const data = await bridgeRequest(roomId, 'get_pages')
     return {
@@ -153,10 +185,10 @@ server.tool(
 
 server.tool(
   'get_shapes',
-  '获取指定房间、指定页面上的所有图形（id/type/x/y/w/h/text/color）。需要浏览器已打开该房间。',
+  'List shapes on a page (id/type/geometry/text/color; geo/text/note also include dash/size/font/align/verticalAlign/textAlign). Requires a browser tab open for this room.',
   {
-    roomId: z.string().describe('房间 ID'),
-    pageId: z.string().optional().describe('Page ID（不填则取浏览器当前激活 page）'),
+    roomId: z.string().describe('Room ID'),
+    pageId: z.string().optional().describe('Page ID (omit to use the active page in the browser)'),
   },
   async ({ roomId, pageId }) => {
     const data = await bridgeRequest(roomId, 'get_shapes', { pageId })
@@ -168,25 +200,44 @@ server.tool(
 
 server.tool(
   'create_shape',
-  '在 tldraw 画布上创建图形。支持 geo（矩形/椭圆等）、text、note、arrow。需要浏览器已打开该房间。',
+  'Create a shape: geo, text, note, or arrow. Geo: dash/size/font/align/verticalAlign. Text: size/font/textAlign. Note: size/font/align/verticalAlign. Requires a browser tab open for this room.',
   {
-    roomId: z.string().describe('房间 ID'),
-    shapeType: z.enum(['geo', 'text', 'note', 'arrow']).describe('geo=几何图形, text=文字, note=便签, arrow=箭头'),
-    x: z.number().describe('画布 X 坐标'),
-    y: z.number().describe('画布 Y 坐标'),
-    w: z.number().optional().describe('宽度（geo/note）'),
-    h: z.number().optional().describe('高度（geo/note）'),
-    text: z.string().optional().describe('文字内容'),
-    color: z.enum([
-      'black', 'blue', 'cyan', 'green', 'grey',
-      'light-blue', 'light-green', 'light-red', 'light-violet',
-      'orange', 'red', 'violet', 'white', 'yellow',
-    ]).optional().describe('颜色'),
-    geoType: z.enum([
-      'rectangle', 'ellipse', 'triangle', 'diamond', 'hexagon', 'cloud', 'star',
-    ]).optional().describe('geo 子类型（默认 rectangle）'),
-    fill: z.enum(['none', 'semi', 'solid', 'pattern']).optional().describe('填充样式'),
-    pageId: z.string().optional().describe('目标 page ID（不填则用当前 page）'),
+    roomId: z.string().describe('Room ID'),
+    shapeType: z.enum(['geo', 'text', 'note', 'arrow']).describe('geo | text | note | arrow'),
+    x: z.number().describe('Canvas X'),
+    y: z.number().describe('Canvas Y'),
+    w: z.number().optional().describe('Width (geo / note)'),
+    h: z.number().optional().describe('Height (geo / note)'),
+    text: z.string().optional().describe('Label / text content'),
+    color: z
+      .enum([
+        'black',
+        'blue',
+        'cyan',
+        'green',
+        'grey',
+        'light-blue',
+        'light-green',
+        'light-red',
+        'light-violet',
+        'orange',
+        'red',
+        'violet',
+        'white',
+        'yellow',
+      ])
+      .optional()
+      .describe('Color'),
+    geoType: z
+      .enum(['rectangle', 'ellipse', 'triangle', 'diamond', 'hexagon', 'cloud', 'star'])
+      .optional()
+      .describe('Geo variant (default rectangle)'),
+    fill: z
+      .enum(['none', 'semi', 'solid', 'pattern', 'fill', 'lined-fill'])
+      .optional()
+      .describe('Fill style (geo)'),
+    pageId: z.string().optional().describe('Target page ID (omit for current page)'),
+    ...stylePropsCreate,
   },
   async (payload) => {
     const { roomId, ...rest } = payload
@@ -199,20 +250,35 @@ server.tool(
 
 server.tool(
   'update_shape',
-  '更新画布上已有图形的属性（位置/大小/文字/颜色）。需要浏览器已打开该房间。',
+  'Update an existing shape (position, size, text, color; geo/text/note also support dash/size/font/align fields — invalid fields for a type are ignored). Requires a browser tab open for this room.',
   {
-    roomId: z.string().describe('房间 ID'),
-    shapeId: z.string().describe('图形 ID（从 get_shapes 获取）'),
-    x: z.number().optional().describe('新的 X 坐标'),
-    y: z.number().optional().describe('新的 Y 坐标'),
-    w: z.number().optional().describe('新的宽度'),
-    h: z.number().optional().describe('新的高度'),
-    text: z.string().optional().describe('新的文字内容'),
-    color: z.enum([
-      'black', 'blue', 'cyan', 'green', 'grey',
-      'light-blue', 'light-green', 'light-red', 'light-violet',
-      'orange', 'red', 'violet', 'white', 'yellow',
-    ]).optional().describe('新的颜色'),
+    roomId: z.string().describe('Room ID'),
+    shapeId: z.string().describe('Shape ID (from get_shapes)'),
+    x: z.number().optional().describe('New X'),
+    y: z.number().optional().describe('New Y'),
+    w: z.number().optional().describe('New width'),
+    h: z.number().optional().describe('New height'),
+    text: z.string().optional().describe('New text'),
+    color: z
+      .enum([
+        'black',
+        'blue',
+        'cyan',
+        'green',
+        'grey',
+        'light-blue',
+        'light-green',
+        'light-red',
+        'light-violet',
+        'orange',
+        'red',
+        'violet',
+        'white',
+        'yellow',
+      ])
+      .optional()
+      .describe('New color'),
+    ...stylePropsUpdate,
   },
   async (payload) => {
     const { roomId, ...rest } = payload
@@ -225,10 +291,10 @@ server.tool(
 
 server.tool(
   'delete_shapes',
-  '删除画布上的一个或多个图形。需要浏览器已打开该房间。',
+  'Delete one or more shapes by ID. Requires a browser tab open for this room.',
   {
-    roomId: z.string().describe('房间 ID'),
-    shapeIds: z.array(z.string()).describe('要删除的图形 ID 列表（从 get_shapes 获取）'),
+    roomId: z.string().describe('Room ID'),
+    shapeIds: z.array(z.string()).describe('Shape IDs to delete (from get_shapes)'),
   },
   async ({ roomId, shapeIds }) => {
     const data = await bridgeRequest(roomId, 'delete_shapes', { shapeIds })
@@ -238,7 +304,7 @@ server.tool(
   }
 )
 
-// ── 启动 ──────────────────────────────────────────────────────────────────────
+// --- Boot ---------------------------------------------------------------------
 
 ;(async () => {
   const transport = new StdioServerTransport()
