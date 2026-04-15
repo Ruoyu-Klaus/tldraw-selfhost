@@ -138,6 +138,85 @@ const stylePropsUpdate = {
   textAlign: zAlignH.optional().describe('Text only'),
 }
 
+const zArrowKind = z.enum(['arc', 'elbow'])
+const zArrowhead = z.enum([
+  'arrow',
+  'bar',
+  'diamond',
+  'dot',
+  'inverted',
+  'none',
+  'pipe',
+  'square',
+  'triangle',
+])
+const zSpline = z.enum(['line', 'cubic'])
+const zLayoutOp = z.enum([
+  'align',
+  'distribute',
+  'stack',
+  'pack',
+  'group',
+  'bring_to_front',
+  'send_to_back',
+])
+const zAlignShapes = z.enum([
+  'top',
+  'bottom',
+  'left',
+  'right',
+  'center-horizontal',
+  'center-vertical',
+])
+
+const arrowPropsCreate = {
+  startX: z.number().optional().describe('Arrow: page X of tail (default: x)'),
+  startY: z.number().optional().describe('Arrow: page Y of tail (default: y)'),
+  endX: z.number().optional().describe('Arrow: page X of head (required for arrow)'),
+  endY: z.number().optional().describe('Arrow: page Y of head (required for arrow)'),
+  bend: z.number().optional().describe('Arrow: bend (-1..1 style curve)'),
+  kind: zArrowKind.optional().describe('Arrow: arc | elbow'),
+  arrowheadStart: zArrowhead.optional(),
+  arrowheadEnd: zArrowhead.optional(),
+  labelPosition: z.number().optional().describe('Arrow: label position along shaft 0..1'),
+  elbowMidPoint: z.number().optional().describe('Arrow: elbow midpoint (elbow kind)'),
+  labelColor: z
+    .enum([
+      'black',
+      'blue',
+      'cyan',
+      'green',
+      'grey',
+      'light-blue',
+      'light-green',
+      'light-red',
+      'light-violet',
+      'orange',
+      'red',
+      'violet',
+      'white',
+      'yellow',
+    ])
+    .optional()
+    .describe('Arrow label color'),
+}
+
+const arrowPropsUpdate = {
+  startX: z.number().optional().describe('Arrow: new tail page X (use with endX/endY/startY)'),
+  startY: z.number().optional().describe('Arrow: new tail page Y'),
+  endX: z.number().optional().describe('Arrow: new head page X'),
+  endY: z.number().optional().describe('Arrow: new head page Y'),
+  bend: z.number().optional(),
+  kind: zArrowKind.optional(),
+  arrowheadStart: zArrowhead.optional(),
+  arrowheadEnd: zArrowhead.optional(),
+  labelPosition: z.number().optional(),
+  elbowMidPoint: z.number().optional(),
+  labelColor: arrowPropsCreate.labelColor,
+  fill: z.enum(['none', 'semi', 'solid', 'pattern', 'fill', 'lined-fill']).optional().describe('Arrow fill'),
+  spline: zSpline.optional().describe('Line: spline style'),
+}
+
 // --- MCP server ---------------------------------------------------------------
 
 const server = new McpServer({
@@ -185,7 +264,7 @@ server.tool(
 
 server.tool(
   'get_shapes',
-  'List shapes on a page (id/type/geometry/text/color; geo/text/note also include dash/size/font/align/verticalAlign/textAlign). Requires a browser tab open for this room.',
+  'List shapes on a page (geo/text/note; arrow endpoints; line; highlight size/complete; legacy frame name if present). Browser tab required.',
   {
     roomId: z.string().describe('Room ID'),
     pageId: z.string().optional().describe('Page ID (omit to use the active page in the browser)'),
@@ -200,15 +279,17 @@ server.tool(
 
 server.tool(
   'create_shape',
-  'Create a shape: geo, text, note, or arrow. Geo: dash/size/font/align/verticalAlign. Text: size/font/textAlign. Note: size/font/align/verticalAlign. Requires a browser tab open for this room.',
+  'Create geo, text, note, arrow, line, or highlight. Arrow: endX/endY page coords; line: linePoints; highlight: highlightPoints. For a semi backdrop that wraps everything, use create_backdrop after placing shapes (do not guess a huge geo). Browser tab required.',
   {
     roomId: z.string().describe('Room ID'),
-    shapeType: z.enum(['geo', 'text', 'note', 'arrow']).describe('geo | text | note | arrow'),
-    x: z.number().describe('Canvas X'),
-    y: z.number().describe('Canvas Y'),
+    shapeType: z
+      .enum(['geo', 'text', 'note', 'arrow', 'line', 'highlight'])
+      .describe('geo | text | note | arrow | line | highlight'),
+    x: z.number().describe('Canvas X (or arrow tail default)'),
+    y: z.number().describe('Canvas Y (or arrow tail default)'),
     w: z.number().optional().describe('Width (geo / note)'),
     h: z.number().optional().describe('Height (geo / note)'),
-    text: z.string().optional().describe('Label / text content'),
+    text: z.string().optional().describe('Text or arrow label'),
     color: z
       .enum([
         'black',
@@ -235,9 +316,21 @@ server.tool(
     fill: z
       .enum(['none', 'semi', 'solid', 'pattern', 'fill', 'lined-fill'])
       .optional()
-      .describe('Fill style (geo)'),
+      .describe('Fill (geo / arrow)'),
     pageId: z.string().optional().describe('Target page ID (omit for current page)'),
+    linePoints: z
+      .array(z.object({ x: z.number(), y: z.number() }))
+      .min(2)
+      .optional()
+      .describe('Line: polyline vertices in page coordinates'),
+    highlightPoints: z
+      .array(z.object({ x: z.number(), y: z.number() }))
+      .min(1)
+      .optional()
+      .describe('Highlight: stroke path in page coordinates (required when shapeType=highlight)'),
+    spline: zSpline.optional().describe('Line: line (polyline) or cubic (smooth)'),
     ...stylePropsCreate,
+    ...arrowPropsCreate,
   },
   async (payload) => {
     const { roomId, ...rest } = payload
@@ -249,16 +342,72 @@ server.tool(
 )
 
 server.tool(
+  'create_backdrop',
+  'Create one geo rectangle from the page union of shapeIds plus padding (default 64px), empty fill style, sendToBack. Include boxes, notes, text, arrows, lines, highlights so the frame matches real extent. Optional deleteBackdropShapeId removes a previous backdrop geo first. Browser tab required.',
+  {
+    roomId: z.string().describe('Room ID'),
+    shapeIds: z
+      .array(z.string())
+      .min(1)
+      .describe('All diagram shapes to wrap (include arrows/lines so bounds are wide enough)'),
+    padding: z
+      .number()
+      .optional()
+      .describe('Extra margin around union bounds in px (default 64; use 96+ if labels stick out)'),
+    color: z
+      .enum([
+        'black',
+        'blue',
+        'cyan',
+        'green',
+        'grey',
+        'light-blue',
+        'light-green',
+        'light-red',
+        'light-violet',
+        'orange',
+        'red',
+        'violet',
+        'white',
+        'yellow',
+      ])
+      .optional()
+      .describe('Geo outline/fill tint (default light-violet)'),
+    fill: z
+      .enum(['none', 'semi', 'solid', 'pattern', 'fill', 'lined-fill'])
+      .optional()
+      .describe('Default semi'),
+    dash: zDash.optional().describe('Default dotted'),
+    geoType: z
+      .enum(['rectangle', 'ellipse', 'triangle', 'diamond', 'hexagon', 'cloud', 'star'])
+      .optional()
+      .describe('Default rectangle'),
+    pageId: z.string().optional().describe('Target page (omit for current)'),
+    deleteBackdropShapeId: z
+      .string()
+      .optional()
+      .describe('If set, delete this shape id first (e.g. old backdrop geo)'),
+  },
+  async (payload) => {
+    const { roomId, ...rest } = payload
+    const data = await bridgeRequest(roomId, 'create_backdrop', rest)
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+    }
+  }
+)
+
+server.tool(
   'update_shape',
-  'Update an existing shape (position, size, text, color; geo/text/note also support dash/size/font/align fields — invalid fields for a type are ignored). Requires a browser tab open for this room.',
+  'Update shape geometry/style. Arrow: page endpoints + style. Line: dash/size/spline. Highlight: color/size/position. Geo/text/note as before. Browser tab required.',
   {
     roomId: z.string().describe('Room ID'),
     shapeId: z.string().describe('Shape ID (from get_shapes)'),
     x: z.number().optional().describe('New X'),
     y: z.number().optional().describe('New Y'),
-    w: z.number().optional().describe('New width'),
+    w: z.number().optional().describe('New width (resize; not used for arrow endpoints)'),
     h: z.number().optional().describe('New height'),
-    text: z.string().optional().describe('New text'),
+    text: z.string().optional().describe('New text or arrow label'),
     color: z
       .enum([
         'black',
@@ -279,6 +428,7 @@ server.tool(
       .optional()
       .describe('New color'),
     ...stylePropsUpdate,
+    ...arrowPropsUpdate,
   },
   async (payload) => {
     const { roomId, ...rest } = payload
@@ -298,6 +448,38 @@ server.tool(
   },
   async ({ roomId, shapeIds }) => {
     const data = await bridgeRequest(roomId, 'delete_shapes', { shapeIds })
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
+    }
+  }
+)
+
+server.tool(
+  'layout_shapes',
+  'Layout: align, distribute, stack, pack, group, z-order. align/distribute/stack/pack ignore arrow/line ids and nudge arrows fully inside the layout block. Browser tab required.',
+  {
+    roomId: z.string().describe('Room ID'),
+    operation: zLayoutOp.describe(
+      'align | distribute | stack | pack | group | bring_to_front | send_to_back'
+    ),
+    shapeIds: z.array(z.string()).min(1).describe('Shapes to affect (order may matter for pack/stack)'),
+    align: zAlignShapes
+      .optional()
+      .describe('Required when operation=align: which edge or center to align'),
+    distribute: z
+      .enum(['horizontal', 'vertical'])
+      .optional()
+      .describe('Required when operation=distribute'),
+    stack: z
+      .enum(['horizontal', 'vertical'])
+      .optional()
+      .describe('Required when operation=stack'),
+    gap: z.number().optional().describe('Gap for stack (optional; editor default if omitted)'),
+    packGap: z.number().optional().describe('Padding for pack (optional)'),
+  },
+  async (payload) => {
+    const { roomId, ...rest } = payload
+    const data = await bridgeRequest(roomId, 'layout_shapes', rest)
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
     }

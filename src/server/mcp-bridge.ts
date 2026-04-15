@@ -15,8 +15,10 @@ export type McpAction =
   | 'get_shapes'
   | 'get_pages'
   | 'create_shape'
+  | 'create_backdrop'
   | 'update_shape'
   | 'delete_shapes'
+  | 'layout_shapes'
 
 /** Browser → MCP server: operation response */
 export interface McpResponse {

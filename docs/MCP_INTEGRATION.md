@@ -181,10 +181,12 @@ interface McpRequest {
 type McpAction =
   | 'get_context'      // 获取当前 room + page 信息
   | 'get_shapes'       // 获取指定 page 的所有 shape
-  | 'create_shape'     // 创建图形
+  | 'create_shape'     // 创建图形（含 geo/text/note/arrow/line/highlight）
+  | 'create_backdrop'  // 按若干 shape 的页面外包矩形 + padding 创建衬底 geo 并置于底层
   | 'update_shape'     // 更新图形属性
   | 'delete_shapes'    // 删除图形（支持批量）
   | 'get_pages'        // 获取 room 内所有 page 列表
+  | 'layout_shapes'    // 对齐 / 分布 / 堆叠 / pack / 成组 / 图层前后
 ```
 
 ### Browser → MCP Server（响应）
@@ -322,6 +324,12 @@ interface McpContextPush {
 }
 // 返回：{ shapeId: 'shape:abc123' }
 ```
+
+### `create_backdrop`
+
+根据 `shapeIds` 在**页面坐标**下求外包矩形并外扩 `padding`（默认 64px），新建一块**无文字**的 `geo` 衬底（默认 `fill: semi`、`dash: dotted`），并 `sendToBack`。**应把箭头、线段、高亮等一并列入 `shapeIds`**，否则外包框会偏窄导致右侧或连线溢出。若需替换旧衬底，传 `deleteBackdropShapeId`。
+
+返回示例：`{ shapeId, x, y, w, h, padding, contentUnion }`。
 
 ### `update_shape`
 
