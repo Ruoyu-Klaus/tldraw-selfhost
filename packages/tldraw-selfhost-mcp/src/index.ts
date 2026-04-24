@@ -48,11 +48,7 @@ function getWs(roomId: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const url = `${WS_BASE}/mcp-bridge?role=mcp&token=${encodeURIComponent(TOKEN)}&roomId=${encodeURIComponent(roomId)}`
 
-    const cfHeaders: Record<string, string> = {}
-    if (CF_CLIENT_ID) cfHeaders['CF-Access-Client-Id'] = CF_CLIENT_ID
-    if (CF_CLIENT_SECRET) cfHeaders['CF-Access-Client-Secret'] = CF_CLIENT_SECRET
-
-    const ws = new WebSocket(url, { headers: cfHeaders })
+    const ws = new WebSocket(url)
 
     const timeout = setTimeout(() => {
       ws.terminate()
