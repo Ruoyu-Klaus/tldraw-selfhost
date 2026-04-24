@@ -136,6 +136,33 @@ sudo tailscale up
 
 访问：`http://100.x.x.x:5858`
 
+如果你要在另一台电脑上的 Cursor 里直连本机 MCP，也建议直接走这个 Tailscale 地址，而不是 Cloudflare 域名。最小配置如下：
+
+```json
+{
+  "mcpServers": {
+    "tldraw": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "https://github.com/OWNER/REPO/releases/download/v1.0.0/tldraw-selfhost-mcp-1.0.0.tgz"
+      ],
+      "env": {
+        "TLDRAW_BASE_URL": "http://100.x.x.x:5858",
+        "MCP_TOKEN": "与服务端相同的 MCP_TOKEN"
+      }
+    }
+  }
+}
+```
+
+说明：
+
+- 不再需要 `CF_ACCESS_CLIENT_ID` 或 `CF_ACCESS_CLIENT_SECRET`
+- 只要 Cursor 所在机器也连上同一个 Tailscale tailnet，即可直接访问
+- `TLDRAW_BASE_URL` 也可以换成该机器的 Tailscale MagicDNS 名称
+- 若连接失败，先检查 `5858` 端口是否能从另一台机器打开
+
 **Tailscale Funnel（可选，生成公网 HTTPS URL）：**
 
 ```bash
